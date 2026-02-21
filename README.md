@@ -23,6 +23,18 @@ If you are getting 403s with requests, try browser-only mode:
 python scrape.py --playwright --browser-only --headful
 ```
 
+If you hit a Cloudflare challenge, run a one-time manual auth and save cookies:
+
+```bash
+python scrape.py --playwright --browser-only --headful --manual-auth --save-storage-state data/storage_state.json --no-sitemap --max-pages 1
+```
+
+Then reuse the session:
+
+```bash
+python scrape.py --playwright --browser-only --storage-state data/storage_state.json --no-sitemap --max-pages 1 --max-listings 50
+```
+
 ## Usage
 
 Basic scrape (defaults to `szemelyauto`, respects robots.txt):

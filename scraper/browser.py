@@ -22,6 +22,7 @@ class PlaywrightClient:
         locale: str = "hu-HU",
         timezone_id: str = "Europe/Budapest",
         accept_language: str = "hu-HU,hu;q=0.9,en-US;q=0.8,en;q=0.7",
+        storage_state_path: str | None = None,
     ) -> None:
         self.timeout_ms = int(timeout_seconds * 1000)
         self.headless = headless
@@ -29,6 +30,7 @@ class PlaywrightClient:
         self.locale = locale
         self.timezone_id = timezone_id
         self.accept_language = accept_language
+        self.storage_state_path = storage_state_path
         self._playwright = None
         self._browser = None
         self._context = None
@@ -47,6 +49,8 @@ class PlaywrightClient:
         }
         if self.user_agent:
             context_args["user_agent"] = self.user_agent
+        if self.storage_state_path:
+            context_args["storage_state"] = self.storage_state_path
         self._context = self._browser.new_context(**context_args)
 
     def close(self) -> None:
@@ -75,3 +79,23 @@ class PlaywrightClient:
             return BrowserResult(url=url, text=None)
         finally:
             page.close()
+
+    def save_storage_state(self, path: str) -> None:
+        if not self._context:
+            return
+        try:
+            self._context.storage_state(path=path)
+        except Exception as exc:
+            LOGGER.warning("Failed to save storage state: %s", exc)
+
+    def open_page(self, url: str):
+        if not self._browser:
+            self.start()
+        if not self._context:
+            self.start()
+        page = self._context.new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+        except Exception as exc:
+            LOGGER.warning("Playwright open failed: %s (%s)", url, exc)
+        return page

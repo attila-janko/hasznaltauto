@@ -50,6 +50,20 @@ def _is_listing_url(url: str, categories: Optional[List[str]] = None) -> bool:
     return False
 
 
+def _write_debug(debug_dir: Optional[str], filename: str, content: str) -> None:
+    if not debug_dir:
+        return
+    try:
+        import os
+
+        os.makedirs(debug_dir, exist_ok=True)
+        path = os.path.join(debug_dir, filename)
+        with open(path, "w", encoding="utf-8", errors="ignore") as handle:
+            handle.write(content)
+    except Exception:
+        LOGGER.warning("Failed to write debug file: %s", filename)
+
+
 def fetch_sitemap_urls(
     client,
     base_url: str,
@@ -57,6 +71,7 @@ def fetch_sitemap_urls(
     max_urls: Optional[int] = None,
     browser=None,
     prefer_browser: bool = False,
+    debug_dir: Optional[str] = None,
 ) -> List[str]:
     sitemap_index = base_url.rstrip("/") + "/sitemap/sitemap_index.xml"
     result = client.fetch(sitemap_index, ignore_robots=True, expect_html=False)
@@ -69,10 +84,17 @@ def fetch_sitemap_urls(
         return []
     if not _looks_like_sitemap(result.text):
         LOGGER.warning("Sitemap index did not return XML: %s", sitemap_index)
+        _write_debug(debug_dir, "sitemap_index.html", result.text)
+        return []
+    try:
+        page_urls, index_urls = parse_sitemap(result.text)
+    except ET.ParseError:
+        LOGGER.warning("Sitemap index XML parse failed: %s", sitemap_index)
+        _write_debug(debug_dir, "sitemap_index_parse_error.html", result.text)
         return []
 
     urls: List[str] = []
-    pending_indexes = [sitemap_index]
+    pending_indexes = index_urls or []
     visited = set()
 
     while pending_indexes:
@@ -93,11 +115,13 @@ def fetch_sitemap_urls(
 
         if not _looks_like_sitemap(result.text):
             LOGGER.warning("Sitemap did not return XML: %s", sitemap_url)
+            _write_debug(debug_dir, "sitemap_non_xml.html", result.text)
             continue
         try:
             page_urls, index_urls = parse_sitemap(result.text)
         except ET.ParseError:
             LOGGER.warning("Sitemap XML parse failed: %s", sitemap_url)
+            _write_debug(debug_dir, "sitemap_parse_error.html", result.text)
             continue
         if index_urls:
             pending_indexes.extend(index_urls)

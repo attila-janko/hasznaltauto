@@ -120,7 +120,9 @@ def extract_listing_urls(html: str, base_url: str, categories: Optional[List[str
             continue
 
         for category in allowed_categories:
-            match = re.search(rf"/{category}/.+-(\d+)$", parsed.path)
+            match = re.search(rf"/{category}/.+-(\d+)(?:/|$|\\.html$)", parsed.path)
+            if not match:
+                match = re.search(rf"/{category}/.+/(\d+)(?:/|$)", parsed.path)
             if match:
                 ad_id = int(match.group(1))
                 found.append((full_url, ad_id))

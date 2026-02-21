@@ -42,6 +42,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--browser-only", action="store_true", help="Use Playwright for all fetches")
     parser.add_argument("--sitemap-via-browser", action="store_true", help="Use Playwright for sitemap fetches")
     parser.add_argument("--headful", action="store_true", help="Run Playwright with visible browser")
+    parser.add_argument("--storage-state", default="", help="Playwright storage state JSON to load")
+    parser.add_argument("--save-storage-state", default="", help="Save Playwright storage state JSON after manual auth")
+    parser.add_argument("--manual-auth", action="store_true", help="Pause for manual browser challenge solving")
+    parser.add_argument("--auth-url", default="", help="URL to open for manual auth")
+    parser.add_argument("--debug-dir", default="", help="Directory to dump debug HTML (optional)")
     parser.add_argument("--store-html", action="store_true", help="Store raw HTML in SQLite")
     parser.add_argument("--no-sitemap", dest="use_sitemap", action="store_false", help="Disable sitemap crawl")
     parser.set_defaults(use_sitemap=True)
@@ -102,6 +107,7 @@ def get_listing_page_urls(
     use_playwright: bool,
     browser: Optional[PlaywrightClient],
     browser_only: bool,
+    debug_dir: Optional[str] = None,
 ) -> List[Tuple[str, int]]:
     listing_refs: List[Tuple[str, int]] = []
     for category in categories:
@@ -126,7 +132,17 @@ def get_listing_page_urls(
                 LOGGER.warning("Failed to fetch listing page: %s", page_url)
                 continue
 
-            listing_refs.extend(extract_listing_urls(html, base_url, categories))
+            extracted = extract_listing_urls(html, base_url, categories)
+            if not extracted and debug_dir:
+                try:
+                    import os
+
+                    os.makedirs(debug_dir, exist_ok=True)
+                    with open(os.path.join(debug_dir, "listing_page.html"), "w", encoding="utf-8", errors="ignore") as handle:
+                        handle.write(html)
+                except Exception:
+                    LOGGER.warning("Failed to write listing page debug HTML")
+            listing_refs.extend(extracted)
             for next_url in extract_pagination_urls(html, base_url):
                 if next_url in visited:
                     continue
@@ -166,17 +182,40 @@ def main() -> None:
     client.set_robots(robots)
     robots.load(client.fetch)
 
+    debug_dir = args.debug_dir or None
+
+    storage_state = args.storage_state or None
+    save_storage_state = args.save_storage_state or None
+    if args.manual_auth and not save_storage_state:
+        save_storage_state = "data/storage_state.json"
+
     browser = (
         PlaywrightClient(
             timeout_seconds=args.timeout,
             headless=not args.headful,
             user_agent=args.user_agent,
+            storage_state_path=storage_state,
         )
         if args.playwright
         else None
     )
 
     try:
+        if args.manual_auth and browser:
+            auth_url = args.auth_url or (args.base_url.rstrip("/") + "/" + categories[0].strip("/"))
+            LOGGER.info("Opening browser for manual auth: %s", auth_url)
+            page = browser.open_page(auth_url)
+            print("Solve the browser challenge in the opened window, then press Enter here to continue...")
+            try:
+                input()
+            except EOFError:
+                pass
+            if page:
+                page.close()
+            if save_storage_state:
+                browser.save_storage_state(save_storage_state)
+                LOGGER.info("Saved storage state: %s", save_storage_state)
+
         listing_urls: List[str] = []
         if args.use_sitemap:
             LOGGER.info("Loading sitemap URLs...")
@@ -187,6 +226,7 @@ def main() -> None:
                 max_urls=args.max_listings,
                 browser=browser,
                 prefer_browser=args.sitemap_via_browser or args.browser_only,
+                debug_dir=debug_dir,
             )
             LOGGER.info("Sitemap URLs collected: %s", len(listing_urls))
 
@@ -201,6 +241,7 @@ def main() -> None:
                 use_playwright=args.playwright,
                 browser=browser,
                 browser_only=args.browser_only,
+                debug_dir=debug_dir,
             )
             listing_urls = [url for url, _ in listing_refs]
 
